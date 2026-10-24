@@ -188,7 +188,7 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(2), 0, dp(6))
         }
-        scroll.addView(list, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(list, ViewGroup.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         root.addView(actionButton("Create A4 PDF   →", Color.rgb(91, 92, 226), Color.WHITE, 17, 56).apply {
