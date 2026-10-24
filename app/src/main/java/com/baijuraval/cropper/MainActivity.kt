@@ -633,12 +633,13 @@ class MainActivity : ComponentActivity() {
             ((y - imageBounds.top) / imageBounds.height()).coerceIn(0f, 1f)
         )
 
-        companion object {
-            private const val MODE_NONE = 0
-            private const val MODE_MOVE = 1
-            private const val MODE_RESIZE = 2
-            private const val MODE_DRAW = 3
-        }
+    }
+
+    companion object {
+        private const val MODE_NONE = 0
+        private const val MODE_MOVE = 1
+        private const val MODE_RESIZE = 2
+        private const val MODE_DRAW = 3
     }
 
     private inner class PdfPrintAdapter(private val file: File) : android.print.PrintDocumentAdapter() {
