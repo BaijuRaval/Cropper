@@ -13,7 +13,8 @@ android {
         versionCode = 1
         versionName = "1.0"
     }
-    dependencies {
-        implementation("androidx.activity:activity-ktx:1.9.3")
-    }
+}
+
+dependencies {
+    implementation("androidx.activity:activity-ktx:1.9.3")
 }
