@@ -64,93 +64,223 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildUi() {
+        val pageBg = Color.rgb(246, 247, 252)
+        window.statusBarColor = pageBg
+        window.navigationBarColor = Color.WHITE
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(24), dp(20), dp(16))
-            setBackgroundColor(Color.rgb(247, 248, 250))
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            setBackgroundColor(pageBg)
         }
-        root.addView(TextView(this).apply {
+
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.rgb(39, 43, 99), Color.rgb(94, 96, 232))
+            ).apply { cornerRadius = dp(26).toFloat() }
+            elevation = dp(3).toFloat()
+        }
+        val heroTop = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        heroTop.addView(TextView(this).apply {
+            text = "✂"
+            textSize = 34f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            background = roundedBackground(Color.argb(42, 255, 255, 255), 18)
+        }, LinearLayout.LayoutParams(dp(62), dp(62)))
+        val titleBlock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), 0, 0, 0)
+        }
+        titleBlock.addView(TextView(this).apply {
+            text = "DOCUMENT STUDIO"
+            textSize = 10f
+            letterSpacing = 0.13f
+            setTextColor(Color.rgb(218, 221, 255))
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        })
+        titleBlock.addView(TextView(this).apply {
             text = "Cropper"
             textSize = 30f
-            setTextColor(Color.rgb(24, 34, 48))
-            paint.isFakeBoldText = true
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setPadding(0, dp(1), 0, 0)
         })
-        root.addView(TextView(this).apply {
-            text = "Crop each document, then fit the full stack on one A4 page."
-            textSize = 15f
-            setTextColor(Color.DKGRAY)
-            setPadding(0, dp(5), 0, dp(18))
+        heroTop.addView(titleBlock, LinearLayout.LayoutParams(0, -2, 1f))
+        hero.addView(heroTop)
+        hero.addView(TextView(this).apply {
+            text = "Turn your photos into a clean, single-page A4 PDF."
+            textSize = 14f
+            setTextColor(Color.rgb(239, 240, 255))
+            setPadding(0, dp(13), 0, dp(13))
         })
-        root.addView(Button(this).apply {
-            text = "＋  Select multiple images"
+        hero.addView(TextView(this).apply {
+            text = "AUTO CROP   •   MANUAL ADJUST   •   A4 PDF"
+            textSize = 10f
+            letterSpacing = 0.04f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(Color.WHITE)
+            background = roundedBackground(Color.argb(38, 255, 255, 255), 10)
+            setPadding(dp(11), dp(7), dp(11), dp(7))
+        })
+        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply {
+            bottomMargin = dp(18)
+        })
+
+        root.addView(actionButton("＋   Add documents", Color.rgb(91, 92, 226), Color.WHITE, 16, 54).apply {
+            textSize = 16f
+            elevation = dp(2).toFloat()
             setOnClickListener {
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
                     type = "image/*"
                     putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                 }
                 startActivityForResult(intent, pickImages)
             }
         }, matchWrap())
 
-        count = TextView(this).apply {
-            text = "No images selected"
-            textSize = 14f
-            setTextColor(Color.DKGRAY)
-            setPadding(0, dp(14), 0, dp(8))
+        root.addView(TextView(this).apply {
+            text = "Select several photos together — JPG or PNG."
+            textSize = 12f
+            setTextColor(Color.rgb(119, 125, 145))
+            setPadding(dp(3), dp(8), dp(3), dp(17))
+        })
+
+        val section = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(1), 0, 0, dp(10))
         }
-        root.addView(count)
-        val scroll = ScrollView(this)
-        list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(list)
+        section.addView(TextView(this).apply {
+            text = "Your documents"
+            textSize = 19f
+            setTextColor(Color.rgb(29, 35, 58))
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        count = TextView(this).apply {
+            text = "0 selected"
+            textSize = 12f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(Color.rgb(91, 92, 226))
+            background = roundedBackground(Color.WHITE, 12, Color.rgb(229, 230, 245))
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+        }
+        section.addView(count)
+        root.addView(section)
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+        }
+        list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(2), 0, dp(6))
+        }
+        scroll.addView(list, ScrollView.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(Button(this).apply {
-            text = "Create A4 & Share / Print  →"
+
+        root.addView(actionButton("Create A4 PDF   →", Color.rgb(91, 92, 226), Color.WHITE, 17, 56).apply {
             textSize = 16f
+            elevation = dp(3).toFloat()
             setOnClickListener {
                 if (selected.isEmpty()) {
-                    Toast.makeText(this@MainActivity, "Select at least one image first", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Add at least one image first", Toast.LENGTH_SHORT).show()
                 } else {
                     printA4()
                 }
             }
-        }, matchWrap().apply { topMargin = dp(12) })
+        }, LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(10)
+        })
+        root.addView(TextView(this).apply {
+            text = "All selected documents · one A4 page"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(132, 137, 155))
+            setPadding(0, dp(8), 0, 0)
+        }, matchWrap())
+
         setContentView(root)
         refresh()
     }
 
     @Deprecated("Uses the document picker result API for broad Android compatibility")
+    @Deprecated("Uses the document picker result API for broad Android compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != pickImages || resultCode != Activity.RESULT_OK || data == null) return
-        val found = mutableListOf<Uri>()
+
+        // ACTION_OPEN_DOCUMENT with EXTRA_ALLOW_MULTIPLE returns the selection in clipData.
+        // Keep data.data as well for providers that return a single URI alongside clipData.
+        val found = linkedSetOf<Uri>()
         data.clipData?.let { clip ->
             for (i in 0 until clip.itemCount) found.add(clip.getItemAt(i).uri)
-        } ?: data.data?.let { found.add(it) }
-        for (uri in found) {
-            if (uri !in selected) {
-                try {
-                    contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                } catch (_: Exception) {}
-                selected.add(uri)
-            }
         }
-        refresh()
-    }
+        data.data?.let { found.add(it) }
 
-    private fun refresh() {
+        for (uri in found) {
+            if    private fun refresh() {
         list.removeAllViews()
-        count.text = if (selected.isEmpty()) "No images selected"
-        else "${selected.size} document(s) • tap Crop to adjust each boundary"
+        count.text = "${selected.size} selected"
+
+        if (selected.isEmpty()) {
+            val empty = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(20), dp(28), dp(20), dp(28))
+                background = roundedBackground(Color.WHITE, 22, Color.rgb(232, 233, 244))
+                elevation = dp(1).toFloat()
+            }
+            empty.addView(TextView(this).apply {
+                text = "▧"
+                textSize = 43f
+                gravity = Gravity.CENTER
+                setTextColor(Color.rgb(112, 111, 235))
+                background = roundedBackground(Color.rgb(243, 243, 255), 20)
+                setPadding(dp(17), dp(8), dp(17), dp(8))
+            }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(14) })
+            empty.addView(TextView(this).apply {
+                text = "Nothing here yet"
+                textSize = 17f
+                gravity = Gravity.CENTER
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                setTextColor(Color.rgb(36, 42, 65))
+            })
+            empty.addView(TextView(this).apply {
+                text = "Tap Add documents and select multiple photos at once. You can adjust each crop before creating your A4 PDF."
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTextColor(Color.rgb(121, 126, 146))
+                setPadding(0, dp(7), 0, 0)
+            })
+            list.addView(empty, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(10)
+            })
+            return
+        }
+
         selected.forEachIndexed { index, uri ->
-            val row = LinearLayout(this).apply {
+            val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), dp(6), dp(6), dp(6))
-                setBackgroundColor(Color.WHITE)
+                setPadding(dp(10), dp(10), dp(8), dp(10))
+                background = roundedBackground(Color.WHITE, 18, Color.rgb(233, 234, 245))
+                elevation = dp(1).toFloat()
             }
             val image = ImageView(this).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
+                clipToOutline = true
+                background = roundedBackground(Color.rgb(240, 241, 248), 12)
                 try {
                     val bitmap = loadBitmap(uri)
                     if (bitmap != null) {
@@ -165,23 +295,91 @@ class MainActivity : ComponentActivity() {
                     } else {
                         setImageURI(uri)
                     }
-                } catch (_: Exception) { setImageURI(uri) }
+                } catch (_: Exception) {
+                    setImageURI(uri)
+                }
             }
-            row.addView(image, LinearLayout.LayoutParams(dp(58), dp(54)))
-            row.addView(TextView(this).apply {
-                text = "Document ${index + 1}"
+            card.addView(image, LinearLayout.LayoutParams(dp(66), dp(70)))
+
+            val labels = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(11), 0, dp(4), 0)
+            }
+            labels.addView(TextView(this).apply {
+                text = "Document ${(index + 1).toString().padStart(2, '0')}"
                 textSize = 14f
-                setTextColor(Color.rgb(35, 45, 60))
-                setPadding(dp(8), 0, dp(2), 0)
-            }, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(Button(this).apply {
-                text = "Crop"
-                setOnClickListener { openCropEditor(uri) }
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTextColor(Color.rgb(36, 42, 65))
+                maxLines = 1
             })
-            row.addView(Button(this).apply {
-                text = "×"
+            labels.addView(TextView(this).apply {
+                text = if (manualCrops.containsKey(uri)) "Manual crop ready" else "Auto-crop enabled"
+                textSize = 11f
+                setTextColor(if (manualCrops.containsKey(uri)) Color.rgb(42, 145, 119) else Color.rgb(124, 129, 149))
+                setPadding(0, dp(4), 0, 0)
+                maxLines = 1
+            })
+            card.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+
+            card.addView(actionButton("Crop", Color.rgb(242, 242, 255), Color.rgb(85, 85, 207), 11, 38).apply {
+                textSize = 12f
+                minWidth = dp(54)
+                setPadding(dp(7), 0, dp(7), 0)
+                elevation = 0f
+                setOnClickListener { openCropEditor(uri) }
+            }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(2) })
+
+            card.addView(actionButton("×", Color.rgb(255, 241, 243), Color.rgb(189, 64, 85), 11, 38).apply {
+                textSize = 19f
+                minWidth = dp(38)
+                setPadding(dp(4), 0, dp(4), 0)
+                elevation = 0f
                 contentDescription = "Remove document"
                 setOnClickListener {
+                    selected.remove(uri)
+                    manualCrops.remove(uri)
+                    refresh()
+                }
+            }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(5) })
+
+            list.addView(card, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(9)
+            })
+        }
+    }
+
+    private fun roundedBackground(fill: Int, radiusDp: Int, stroke: Int? = null): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(fill)
+            cornerRadius = dp(radiusDp).toFloat()
+            if (stroke != null) setStroke(dp(1), stroke)
+        }
+    }
+
+    private fun actionButton(
+        label: String,
+        fill: Int,
+        foreground: Int,
+        radiusDp: Int = 16,
+        heightDp: Int = 52
+    ): Button {
+        return Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 14f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(foreground)
+            background = roundedBackground(fill, radiusDp)
+            minimumHeight = dp(heightDp)
+            minHeight = dp(heightDp)
+            setPadding(dp(12), 0, dp(12), 0)
+            stateListAnimator = null
+        }
+    }
+
+nClickListener {
                     selected.remove(uri)
                     manualCrops.remove(uri)
                     refresh()
@@ -505,13 +703,13 @@ class MainActivity : ComponentActivity() {
         private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val shadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x77000000 }
         private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(65, 190, 255)
+            color = Color.rgb(117, 111, 255)
             style = Paint.Style.STROKE
             strokeWidth = dp(2).toFloat()
         }
         private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL }
         private val cornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(65, 190, 255); style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat()
+            color = Color.rgb(117, 111, 255); style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat()
         }
         private var mode = MODE_NONE
         private var corner = -1
