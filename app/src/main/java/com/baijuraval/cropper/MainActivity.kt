@@ -3,6 +3,7 @@ package com.baijuraval.cropper
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
+import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -28,6 +29,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.core.content.FileProvider
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Mat
@@ -103,7 +105,7 @@ class MainActivity : ComponentActivity() {
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(Button(this).apply {
-            text = "Crop & Print one A4 page  →"
+            text = "Create A4 & Share / Print  →"
             textSize = 16f
             setOnClickListener {
                 if (selected.isEmpty()) {
@@ -330,8 +332,21 @@ class MainActivity : ComponentActivity() {
 
                 val output = File(cacheDir, "cropper-a4.pdf")
                 FileOutputStream(output).use { document.writeTo(it) }
-                val printManager = getSystemService(PRINT_SERVICE) as PrintManager
-                printManager.print("Cropper - one-page A4", PdfPrintAdapter(output), attrs)
+
+                // Open the native Android sharesheet with the generated PDF attached.
+                // Recipients receive temporary read access through FileProvider.
+                val pdfUri = FileProvider.getUriForFile(
+                    this@MainActivity,
+                    "$packageName.fileprovider",
+                    output
+                )
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, pdfUri)
+                    clipData = ClipData.newUri(contentResolver, "Cropper A4 PDF", pdfUri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share or print A4 PDF"))
             } finally {
                 document.close()
             }
