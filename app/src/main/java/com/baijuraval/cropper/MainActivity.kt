@@ -1,12 +1,15 @@
 package com.baijuraval.cropper
 
 import android.app.Activity
+import android.app.Dialog
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.RectF
 import android.net.Uri
 import android.os.Bundle
@@ -14,8 +17,11 @@ import android.print.PrintAttributes
 import android.print.PrintManager
 import android.print.pdf.PrintedPdfDocument
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -24,7 +30,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
-import org.opencv.core.Core
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
@@ -33,6 +38,7 @@ import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -40,6 +46,7 @@ import kotlin.math.sqrt
 
 class MainActivity : ComponentActivity() {
     private val selected = mutableListOf<Uri>()
+    private val manualCrops = mutableMapOf<Uri, RectF>()
     private lateinit var list: LinearLayout
     private lateinit var count: TextView
     private val pickImages = 101
@@ -47,14 +54,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        openCvReady = try {
-            OpenCVLoader.initLocal()
-        } catch (_: Throwable) {
-            false
-        }
+        openCvReady = try { OpenCVLoader.initLocal() } catch (_: Throwable) { false }
         window.statusBarColor = Color.rgb(247, 248, 250)
         window.navigationBarColor = Color.WHITE
-        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         buildUi()
     }
 
@@ -71,7 +74,7 @@ class MainActivity : ComponentActivity() {
             paint.isFakeBoldText = true
         })
         root.addView(TextView(this).apply {
-            text = "Auto-crop documents and stack them vertically on A4."
+            text = "Crop each document, then fit the full stack on one A4 page."
             textSize = 15f
             setTextColor(Color.DKGRAY)
             setPadding(0, dp(5), 0, dp(18))
@@ -100,7 +103,7 @@ class MainActivity : ComponentActivity() {
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(Button(this).apply {
-            text = "Crop & Print A4  →"
+            text = "Crop & Print one A4 page  →"
             textSize = 16f
             setOnClickListener {
                 if (selected.isEmpty()) {
@@ -126,8 +129,7 @@ class MainActivity : ComponentActivity() {
             if (uri !in selected) {
                 try {
                     contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                } catch (_: Exception) {
-                }
+                } catch (_: Exception) {}
                 selected.add(uri)
             }
         }
@@ -136,36 +138,50 @@ class MainActivity : ComponentActivity() {
 
     private fun refresh() {
         list.removeAllViews()
-        count.text = if (selected.isEmpty()) {
-            "No images selected"
-        } else {
-            "${selected.size} image(s) • auto-crop, then vertical A4 layout"
-        }
+        count.text = if (selected.isEmpty()) "No images selected"
+        else "${selected.size} document(s) • tap Crop to adjust each boundary"
         selected.forEachIndexed { index, uri ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(10), dp(8), dp(10), dp(8))
+                setPadding(dp(8), dp(6), dp(6), dp(6))
                 setBackgroundColor(Color.WHITE)
             }
             val image = ImageView(this).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 try {
-                    setImageURI(uri)
-                } catch (_: Exception) {
-                }
+                    val bitmap = loadBitmap(uri)
+                    if (bitmap != null) {
+                        val crop = manualCrops[uri]
+                        if (crop != null) {
+                            val preview = cropBitmap(bitmap, crop)
+                            if (preview !== bitmap) bitmap.recycle()
+                            setImageBitmap(preview)
+                        } else {
+                            setImageBitmap(bitmap)
+                        }
+                    } else {
+                        setImageURI(uri)
+                    }
+                } catch (_: Exception) { setImageURI(uri) }
             }
-            row.addView(image, LinearLayout.LayoutParams(dp(76), dp(56)))
+            row.addView(image, LinearLayout.LayoutParams(dp(58), dp(54)))
             row.addView(TextView(this).apply {
                 text = "Document ${index + 1}"
-                textSize = 15f
+                textSize = 14f
                 setTextColor(Color.rgb(35, 45, 60))
-                setPadding(dp(12), 0, 0, 0)
+                setPadding(dp(8), 0, dp(2), 0)
             }, LinearLayout.LayoutParams(0, -2, 1f))
             row.addView(Button(this).apply {
-                text = "Remove"
+                text = "Crop"
+                setOnClickListener { openCropEditor(uri) }
+            })
+            row.addView(Button(this).apply {
+                text = "×"
+                contentDescription = "Remove document"
                 setOnClickListener {
                     selected.remove(uri)
+                    manualCrops.remove(uri)
                     refresh()
                 }
             })
@@ -173,27 +189,96 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun openCropEditor(uri: Uri) {
+        val bitmap = loadBitmap(uri)
+        if (bitmap == null) {
+            Toast.makeText(this, "Could not open this image", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialog = Dialog(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setBackgroundColor(Color.WHITE)
+        }
+        root.addView(TextView(this).apply {
+            text = "Adjust crop"
+            textSize = 21f
+            setTextColor(Color.rgb(24, 34, 48))
+            paint.isFakeBoldText = true
+        })
+        root.addView(TextView(this).apply {
+            text = "Drag inside to move. Drag a corner to resize, or drag outside to draw a new crop."
+            textSize = 13f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, dp(5), 0, dp(10))
+        })
+        val initial = manualCrops[uri] ?: RectF(0.03f, 0.03f, 0.97f, 0.97f)
+        val cropView = CropOverlayView(this, bitmap, initial)
+        val frame = FrameLayout(this).apply { setBackgroundColor(Color.rgb(30, 34, 40)) }
+        frame.addView(cropView, FrameLayout.LayoutParams(-1, -1))
+        root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, 0)
+        }
+        actions.addView(Button(this).apply {
+            text = "Cancel"
+            setOnClickListener {
+                dialog.dismiss()
+                bitmap.recycle()
+            }
+        })
+        actions.addView(Button(this).apply {
+            text = "Auto"
+            contentDescription = "Clear manual crop and use automatic detection"
+            setOnClickListener {
+                manualCrops.remove(uri)
+                dialog.dismiss()
+                bitmap.recycle()
+                refresh()
+            }
+        })
+        actions.addView(Button(this).apply {
+            text = "Use crop"
+            setOnClickListener {
+                manualCrops[uri] = cropView.selectedCrop
+                dialog.dismiss()
+                bitmap.recycle()
+                refresh()
+            }
+        })
+        root.addView(actions, matchWrap())
+        dialog.setContentView(root)
+        dialog.setOnDismissListener {
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        dialog.show()
+        dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.94f).toInt(),
+            (resources.displayMetrics.heightPixels * 0.82f).toInt())
+    }
+
     private fun printA4() {
         val processed = mutableListOf<Bitmap>()
         try {
             selected.forEach { uri ->
                 val source = loadBitmap(uri) ?: return@forEach
-                val cropped = try {
-                    autoCropDocument(source)
-                } catch (_: Exception) {
-                    source
+                val manual = manualCrops[uri]
+                val result = if (manual != null) {
+                    cropBitmap(source, manual)
+                } else {
+                    try { autoCropDocument(source) } catch (_: Exception) { source }
                 }
-                if (cropped !== source) source.recycle()
-                processed.add(cropped)
+                if (result !== source) source.recycle()
+                processed.add(result)
             }
             if (processed.isEmpty()) {
                 Toast.makeText(this, "Could not open the selected images", Toast.LENGTH_LONG).show()
                 return
             }
-            if (!openCvReady) {
-                Toast.makeText(this, "Auto-crop is unavailable on this device; images will still be arranged on A4.", Toast.LENGTH_LONG).show()
-            }
-
             val attrs = PrintAttributes.Builder()
                 .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
                 .setResolution(PrintAttributes.Resolution("cropper", "Cropper", 300, 300))
@@ -203,54 +288,50 @@ class MainActivity : ComponentActivity() {
             val pageWidth = 595f
             val pageHeight = 842f
             val margin = 24f
-            val gap = 14f
+            val gap = 8f
             val contentWidth = pageWidth - margin * 2f
             val contentHeight = pageHeight - margin * 2f
-            val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(215, 219, 225)
-                style = Paint.Style.STROKE
-                strokeWidth = 0.65f
-            }
-            val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+            val safeGap = if (processed.size > 1) min(gap, contentHeight / (processed.size - 1) * 0.20f) else 0f
+
+            // Base layout uses full page width, then uniformly scales the whole stack
+            // down just enough for every selected document to fit on this single A4 page.
+            val totalNaturalHeight = processed.sumOf { bitmap ->
+                contentWidth.toDouble() * bitmap.height.toDouble() / bitmap.width.toDouble()
+            }.toFloat()
+            val totalGap = safeGap * max(0, processed.size - 1)
+            val availableForImages = max(1f, contentHeight - totalGap)
+            val uniformScale = min(1f, availableForImages / max(1f, totalNaturalHeight))
 
             try {
-                var pageNumber = 1
-                var page = document.startPage(pageNumber)
-                var canvas = page.canvas
-                preparePageCanvas(canvas, pageWidth, pageHeight)
+                val page = document.startPage(1)
+                val canvas = page.canvas
+                canvas.drawColor(Color.WHITE)
+                canvas.save()
+                canvas.scale(canvas.width / pageWidth, canvas.height / pageHeight)
+
+                val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.rgb(215, 219, 225)
+                    style = Paint.Style.STROKE
+                    strokeWidth = 0.65f
+                }
+                val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
                 var y = margin
-
                 processed.forEach { bitmap ->
-                    val scale = min(
-                        contentWidth / bitmap.width.toFloat(),
-                        contentHeight / bitmap.height.toFloat()
-                    )
-                    val drawWidth = bitmap.width * scale
-                    val drawHeight = bitmap.height * scale
-
-                    if (y > margin && y + drawHeight > pageHeight - margin) {
-                        canvas.restore()
-                        document.finishPage(page)
-                        pageNumber++
-                        page = document.startPage(pageNumber)
-                        canvas = page.canvas
-                        preparePageCanvas(canvas, pageWidth, pageHeight)
-                        y = margin
-                    }
-
+                    val drawWidth = contentWidth * uniformScale
+                    val drawHeight = drawWidth * bitmap.height.toFloat() / bitmap.width.toFloat()
                     val left = (pageWidth - drawWidth) / 2f
                     val dest = RectF(left, y, left + drawWidth, y + drawHeight)
                     canvas.drawBitmap(bitmap, null, dest, imagePaint)
                     canvas.drawRect(dest, border)
-                    y = dest.bottom + gap
+                    y = dest.bottom + safeGap
                 }
-
                 canvas.restore()
                 document.finishPage(page)
+
                 val output = File(cacheDir, "cropper-a4.pdf")
                 FileOutputStream(output).use { document.writeTo(it) }
                 val printManager = getSystemService(PRINT_SERVICE) as PrintManager
-                printManager.print("Cropper - vertical A4 documents", PdfPrintAdapter(output), attrs)
+                printManager.print("Cropper - one-page A4", PdfPrintAdapter(output), attrs)
             } finally {
                 document.close()
             }
@@ -261,28 +342,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun preparePageCanvas(canvas: Canvas, pageWidth: Float, pageHeight: Float) {
-        canvas.drawColor(Color.WHITE)
-        canvas.save()
-        canvas.scale(canvas.width / pageWidth, canvas.height / pageHeight)
+    private fun cropBitmap(source: Bitmap, normalized: RectF): Bitmap {
+        val left = (normalized.left * source.width).roundToInt().coerceIn(0, source.width - 1)
+        val top = (normalized.top * source.height).roundToInt().coerceIn(0, source.height - 1)
+        val right = (normalized.right * source.width).roundToInt().coerceIn(left + 1, source.width)
+        val bottom = (normalized.bottom * source.height).roundToInt().coerceIn(top + 1, source.height)
+        if (left == 0 && top == 0 && right == source.width && bottom == source.height) return source
+        return Bitmap.createBitmap(source, left, top, right - left, bottom - top)
     }
 
-    /**
-     * Finds the largest clear four-corner document contour and perspective-corrects it.
-     * If a clear boundary isn't detected, the original image is preserved rather than
-     * accidentally cutting off document content.
-     */
     private fun autoCropDocument(bitmap: Bitmap): Bitmap {
         if (!openCvReady) return bitmap
         val corners = detectDocumentCorners(bitmap) ?: return bitmap
         val ordered = orderCorners(corners)
-
-        val widthTop = distance(ordered[0], ordered[1])
-        val widthBottom = distance(ordered[3], ordered[2])
-        val heightRight = distance(ordered[1], ordered[2])
-        val heightLeft = distance(ordered[0], ordered[3])
-        val outputWidth = max(widthTop, widthBottom).roundToInt().coerceIn(2, 3500)
-        val outputHeight = max(heightRight, heightLeft).roundToInt().coerceIn(2, 3500)
+        val outputWidth = max(distance(ordered[0], ordered[1]), distance(ordered[3], ordered[2]))
+            .roundToInt().coerceIn(2, 3500)
+        val outputHeight = max(distance(ordered[1], ordered[2]), distance(ordered[0], ordered[3]))
+            .roundToInt().coerceIn(2, 3500)
         if (outputWidth < 2 || outputHeight < 2) return bitmap
 
         val sourcePoints = MatOfPoint2f().apply { fromArray(*ordered) }
@@ -300,16 +376,8 @@ class MainActivity : ComponentActivity() {
         return try {
             Utils.bitmapToMat(bitmap, sourceMat)
             transform = Imgproc.getPerspectiveTransform(sourcePoints, destinationPoints)
-            Imgproc.warpPerspective(
-                sourceMat,
-                corrected,
-                transform,
-                Size(outputWidth.toDouble(), outputHeight.toDouble()),
-                Imgproc.INTER_CUBIC
-            )
-            Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888).also {
-                Utils.matToBitmap(corrected, it)
-            }
+            Imgproc.warpPerspective(sourceMat, corrected, transform, Size(outputWidth.toDouble(), outputHeight.toDouble()), Imgproc.INTER_CUBIC)
+            Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888).also { Utils.matToBitmap(corrected, it) }
         } catch (_: Exception) {
             bitmap
         } finally {
@@ -325,11 +393,8 @@ class MainActivity : ComponentActivity() {
         val ratio = min(1.0, 1200.0 / max(bitmap.width, bitmap.height).toDouble())
         val smallWidth = (bitmap.width * ratio).roundToInt().coerceAtLeast(1)
         val smallHeight = (bitmap.height * ratio).roundToInt().coerceAtLeast(1)
-        val small = if (smallWidth != bitmap.width || smallHeight != bitmap.height) {
-            Bitmap.createScaledBitmap(bitmap, smallWidth, smallHeight, true)
-        } else {
-            bitmap
-        }
+        val small = if (smallWidth != bitmap.width || smallHeight != bitmap.height)
+            Bitmap.createScaledBitmap(bitmap, smallWidth, smallHeight, true) else bitmap
 
         val rgba = Mat()
         val gray = Mat()
@@ -352,14 +417,12 @@ class MainActivity : ComponentActivity() {
             for (contour in contours.sortedByDescending { Imgproc.contourArea(it) }.take(40)) {
                 val areaRatio = Imgproc.contourArea(contour) / imageArea
                 if (areaRatio < 0.08 || areaRatio > 0.96) continue
-
                 val curve = MatOfPoint2f()
                 val approx = MatOfPoint2f()
                 var polygon: MatOfPoint? = null
                 try {
                     curve.fromArray(*contour.toArray())
-                    val perimeter = Imgproc.arcLength(curve, true)
-                    Imgproc.approxPolyDP(curve, approx, 0.02 * perimeter, true)
+                    Imgproc.approxPolyDP(curve, approx, 0.02 * Imgproc.arcLength(curve, true), true)
                     val points = approx.toArray()
                     if (points.size == 4) {
                         polygon = MatOfPoint(*points)
@@ -404,7 +467,6 @@ class MainActivity : ComponentActivity() {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-
         var sampleSize = 1
         val longest = max(bounds.outWidth, bounds.outHeight)
         while (longest / sampleSize > 2800) sampleSize *= 2
@@ -413,11 +475,171 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun matchWrap() = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
     )
-
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    private inner class CropOverlayView(
+        context: Context,
+        private val bitmap: Bitmap,
+        initial: RectF
+    ) : View(context) {
+        private val imageBounds = RectF()
+        private var crop = RectF(initial)
+        val selectedCrop: RectF get() = RectF(crop)
+        private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        private val shadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x77000000 }
+        private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(65, 190, 255)
+            style = Paint.Style.STROKE
+            strokeWidth = dp(2).toFloat()
+        }
+        private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL }
+        private val cornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(65, 190, 255); style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat()
+        }
+        private var mode = MODE_NONE
+        private var corner = -1
+        private var startX = 0f
+        private var startY = 0f
+        private var startRect = RectF(crop)
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            canvas.drawColor(Color.rgb(30, 34, 40))
+            if (bitmap.width <= 0 || bitmap.height <= 0 || width == 0 || height == 0) return
+            val scale = min(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
+            val drawWidth = bitmap.width * scale
+            val drawHeight = bitmap.height * scale
+            imageBounds.set((width - drawWidth) / 2f, (height - drawHeight) / 2f,
+                (width + drawWidth) / 2f, (height + drawHeight) / 2f)
+            canvas.drawBitmap(bitmap, null, imageBounds, bitmapPaint)
+            val selected = toScreen(crop)
+            canvas.drawRect(imageBounds.left, imageBounds.top, imageBounds.right, selected.top, shadePaint)
+            canvas.drawRect(imageBounds.left, selected.bottom, imageBounds.right, imageBounds.bottom, shadePaint)
+            canvas.drawRect(imageBounds.left, selected.top, selected.left, selected.bottom, shadePaint)
+            canvas.drawRect(selected.right, selected.top, imageBounds.right, selected.bottom, shadePaint)
+            canvas.drawRect(selected, linePaint)
+            val radius = dp(6).toFloat()
+            val handleRadius = dp(7).toFloat()
+            corners(selected).forEach { p ->
+                canvas.drawCircle(p.x, p.y, handleRadius, handlePaint)
+                canvas.drawCircle(p.x, p.y, handleRadius, cornerPaint)
+            }
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (imageBounds.width() <= 0f || imageBounds.height() <= 0f) return false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.x
+                    startY = event.y
+                    startRect = RectF(crop)
+                    val selected = toScreen(crop)
+                    corner = nearestCorner(event.x, event.y, selected)
+                    mode = when {
+                        corner >= 0 -> MODE_RESIZE
+                        selected.contains(event.x, event.y) -> MODE_MOVE
+                        else -> MODE_DRAW
+                    }
+                    if (mode == MODE_DRAW) {
+                        val p = toNormalized(event.x, event.y)
+                        crop = RectF(p.x, p.y, p.x, p.y)
+                    }
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    invalidate()
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val p = toNormalized(event.x, event.y)
+                    when (mode) {
+                        MODE_MOVE -> {
+                            val dx = (event.x - startX) / imageBounds.width()
+                            val dy = (event.y - startY) / imageBounds.height()
+                            val w = startRect.width()
+                            val h = startRect.height()
+                            val left = (startRect.left + dx).coerceIn(0f, 1f - w)
+                            val top = (startRect.top + dy).coerceIn(0f, 1f - h)
+                            crop = RectF(left, top, left + w, top + h)
+                        }
+                        MODE_RESIZE -> crop = resizeFromCorner(startRect, p, corner)
+                        MODE_DRAW -> crop = RectF(
+                            min(toNormalized(startX, startY).x, p.x),
+                            min(toNormalized(startX, startY).y, p.y),
+                            max(toNormalized(startX, startY).x, p.x),
+                            max(toNormalized(startX, startY).y, p.y)
+                        )
+                    }
+                    invalidate()
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (crop.width() < 0.035f || crop.height() < 0.035f) crop = RectF(startRect)
+                    crop = RectF(
+                        crop.left.coerceIn(0f, 0.97f),
+                        crop.top.coerceIn(0f, 0.97f),
+                        crop.right.coerceIn(0.03f, 1f),
+                        crop.bottom.coerceIn(0.03f, 1f)
+                    )
+                    mode = MODE_NONE
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    invalidate()
+                    return true
+                }
+            }
+            return true
+        }
+
+        private fun resizeFromCorner(base: RectF, p: PointF, which: Int): RectF {
+            val minSide = 0.035f
+            var left = base.left
+            var top = base.top
+            var right = base.right
+            var bottom = base.bottom
+            when (which) {
+                0 -> { left = p.x.coerceIn(0f, right - minSide); top = p.y.coerceIn(0f, bottom - minSide) }
+                1 -> { right = p.x.coerceIn(left + minSide, 1f); top = p.y.coerceIn(0f, bottom - minSide) }
+                2 -> { right = p.x.coerceIn(left + minSide, 1f); bottom = p.y.coerceIn(top + minSide, 1f) }
+                3 -> { left = p.x.coerceIn(0f, right - minSide); bottom = p.y.coerceIn(top + minSide, 1f) }
+            }
+            return RectF(left, top, right, bottom)
+        }
+
+        private fun nearestCorner(x: Float, y: Float, screen: RectF): Int {
+            val all = corners(screen)
+            var chosen = -1
+            var best = dp(28).toFloat()
+            all.forEachIndexed { index, p ->
+                val dist = hypot(x - p.x, y - p.y)
+                if (dist < best) { best = dist; chosen = index }
+            }
+            return chosen
+        }
+
+        private fun corners(rect: RectF) = listOf(
+            PointF(rect.left, rect.top), PointF(rect.right, rect.top),
+            PointF(rect.right, rect.bottom), PointF(rect.left, rect.bottom)
+        )
+
+        private fun toScreen(rect: RectF) = RectF(
+            imageBounds.left + rect.left * imageBounds.width(),
+            imageBounds.top + rect.top * imageBounds.height(),
+            imageBounds.left + rect.right * imageBounds.width(),
+            imageBounds.top + rect.bottom * imageBounds.height()
+        )
+
+        private fun toNormalized(x: Float, y: Float) = PointF(
+            ((x - imageBounds.left) / imageBounds.width()).coerceIn(0f, 1f),
+            ((y - imageBounds.top) / imageBounds.height()).coerceIn(0f, 1f)
+        )
+
+        companion object {
+            private const val MODE_NONE = 0
+            private const val MODE_MOVE = 1
+            private const val MODE_RESIZE = 2
+            private const val MODE_DRAW = 3
+        }
+    }
 
     private inner class PdfPrintAdapter(private val file: File) : android.print.PrintDocumentAdapter() {
         override fun onLayout(
@@ -433,7 +655,7 @@ class MainActivity : ComponentActivity() {
             }
             val info = android.print.PrintDocumentInfo.Builder(file.name)
                 .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
-                .setPageCount(android.print.PrintDocumentInfo.PAGE_COUNT_UNKNOWN)
+                .setPageCount(1)
                 .build()
             callback.onLayoutFinished(info, true)
         }
@@ -448,7 +670,7 @@ class MainActivity : ComponentActivity() {
                 java.io.FileInputStream(file).use { input ->
                     java.io.FileOutputStream(destination.fileDescriptor).use { output -> input.copyTo(output) }
                 }
-                callback.onWriteFinished(arrayOf(android.print.PageRange.ALL_PAGES))
+                callback.onWriteFinished(arrayOf(android.print.PageRange(0, 0)))
             } catch (e: Exception) {
                 callback.onWriteFailed(e.message)
             }
