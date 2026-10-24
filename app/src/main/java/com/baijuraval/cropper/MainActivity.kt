@@ -12,6 +12,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.print.PrintAttributes
@@ -228,7 +230,17 @@ class MainActivity : ComponentActivity() {
         data.data?.let { found.add(it) }
 
         for (uri in found) {
-            if    private fun refresh() {
+            if (uri !in selected) {
+                try {
+                    contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: Exception) {}
+                selected.add(uri)
+            }
+        }
+        refresh()
+    }
+
+    private fun refresh() {
         list.removeAllViews()
         count.text = "${selected.size} selected"
 
@@ -375,16 +387,6 @@ class MainActivity : ComponentActivity() {
             minHeight = dp(heightDp)
             setPadding(dp(12), 0, dp(12), 0)
             stateListAnimator = null
-        }
-    }
-
-nClickListener {
-                    selected.remove(uri)
-                    manualCrops.remove(uri)
-                    refresh()
-                }
-            })
-            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
     }
 
