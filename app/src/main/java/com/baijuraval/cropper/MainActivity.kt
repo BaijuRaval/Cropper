@@ -215,7 +215,6 @@ class MainActivity : ComponentActivity() {
     }
 
     @Deprecated("Uses the document picker result API for broad Android compatibility")
-    @Deprecated("Uses the document picker result API for broad Android compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != pickImages || resultCode != Activity.RESULT_OK || data == null) return
